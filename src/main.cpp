@@ -3,11 +3,15 @@
 #include <GLFW/glfw3.h>
 
 #include <cassert>
+#include <chrono>
 #include <cstddef>
-#include <cstdio>
+#include <print>
 #include <cstdlib>
 #include <format>
 #include <expected>
+#include <array>
+#include <stdexcept>
+#include <utility>
 
 #include <glm/glm.hpp>
 #include <glm/mat4x4.hpp>
@@ -20,6 +24,7 @@ class Shader {
 public:
     ~Shader() {
         if (shaderID > 0) {
+            // std::println("Shader {} deleted", shaderID);
             glDeleteProgram(shaderID);
         }
     }
@@ -31,32 +36,14 @@ public:
         sh.shaderID = 0;
     }
 
-    static std::expected<Shader, std::runtime_error> init() {
+    static std::expected<Shader, std::runtime_error> init(const char *vertexShaderSource, const char *fragmentShaderSource) {
+        if (vertexShaderSource == NULL || fragmentShaderSource == NULL) {
+            return std::unexpected<std::runtime_error>("vertex and fragment shader sources should not be null");
+        }
+
         // vertex shader
-        const char *vertexShaderCode = ""
-            "#version 330 core\n"
-            "\n"
-            "layout (location=0) in vec3 aPos;\n"
-            "layout (location=1) in vec3 aNormal;\n"
-            "\n"
-            "uniform mat4 projection;\n"
-            "uniform mat4 view;\n"
-            "uniform mat4 model;\n"
-            "uniform vec3 lightPos;\n"
-            "uniform vec3 viewPos;\n"
-            "\n"
-            "out vec3 Normal;\n"
-            "out vec3 light;\n"
-            "out vec3 viewFrag;\n"
-            "\n"
-            "void main() {\n"
-            "   gl_Position = projection * view * model * vec4(aPos, 1.0);\n"
-            "   Normal = mat3(transpose(inverse(model))) * aNormal;\n"
-            "   light = lightPos - (model * vec4(aPos, 1.0)).xyz;\n"
-            "   viewFrag = viewPos - (model * vec4(aPos, 1.0)).xyz;\n"
-            "}\n";
         unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-        glShaderSource(vertexShader, 1, &vertexShaderCode, NULL);
+        glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
         glCompileShader(vertexShader);
 
         // error handling
@@ -70,40 +57,8 @@ public:
         }
 
         // fragment shader
-        const char *fragmentShaderCode = ""
-            "#version 330 core\n"
-            "\n"
-            "in vec3 Normal;\n"
-            "in vec3 light;\n"
-            "in vec3 viewFrag;\n"
-            "\n"
-            "uniform vec3 aColor;\n"
-            "uniform vec3 lightColor;\n"
-            "\n"
-            "out vec4 FragColor;\n"
-            "\n"
-            "void main() {\n"
-            "   vec3 lights = vec3(0.0, 0.0, 0.0);\n"
-            "   float ambientStrength = 0.2;\n"
-            "   float specularStrength = 0.5;\n"
-            "   lights += lightColor * ambientStrength;  // ambient light\n"
-            "   \n"
-            "   float NdotL = dot(normalize(Normal), normalize(light));\n"
-            "   if (NdotL > 0) {\n"
-            "       // diffuse lighting\n"
-            "       lights += max(NdotL, 0.0);  // diffuse light\n"
-            "       \n"
-            "       // specular lighting\n"
-            "       vec3 reflectDir = reflect(-normalize(light), Normal);\n"
-            "       float viewHit = dot(reflectDir, normalize(viewFrag));\n"
-            "       float spec = pow(max(viewHit, 0.0), 16.0);\n"
-            "       lights += specularStrength * spec * lightColor; // specular light\n"
-            "   }\n"
-            "   \n"
-            "   FragColor = vec4(aColor * lights, 1.0);\n"
-            "}\n";
         unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-        glShaderSource(fragmentShader, 1, &fragmentShaderCode, NULL);
+        glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
         glCompileShader(fragmentShader);
 
         // error handling
@@ -151,135 +106,349 @@ public:
     }
 
     void use() {
+        // std::println("Using program: {}", shaderID);
         glUseProgram(shaderID);
+        // std::println("Error: {}", glGetError());
         assert(glGetError() == GL_NO_ERROR);
     }
 };
 
+std::expected<std::array<Shader, 2>, std::runtime_error> initShaders() {
+    const char *vs1 = ""
+        "#version 330 core\n"
+        "\n"
+        "layout (location=0) in vec3 aPos;\n"
+        "layout (location=1) in vec3 aNormal;\n"
+        "\n"
+        "uniform mat4 projection;\n"
+        "uniform mat4 view;\n"
+        "uniform mat4 model;\n"
+        "uniform vec3 lightPos;\n"
+        "uniform vec3 viewPos;\n"
+        "\n"
+        "out vec3 Normal;\n"
+        "out vec3 light;\n"
+        "out vec3 viewFrag;\n"
+        "\n"
+        "void main() {\n"
+        "   gl_Position = projection * view * model * vec4(aPos, 1.0);\n"
+        "   Normal = mat3(transpose(inverse(model))) * aNormal;\n"
+        "   light = lightPos - (model * vec4(aPos, 1.0)).xyz;\n"
+        "   viewFrag = viewPos - (model * vec4(aPos, 1.0)).xyz;\n"
+        "}\n";
+    const char *fs1 = ""
+        "#version 330 core\n"
+        "\n"
+        "in vec3 Normal;\n"
+        "in vec3 light;\n"
+        "in vec3 viewFrag;\n"
+        "\n"
+        "uniform vec3 aColor;\n"
+        "uniform vec3 lightColor;\n"
+        "\n"
+        "out vec4 FragColor;\n"
+        "\n"
+        "void main() {\n"
+        "   vec3 lights = vec3(0.0, 0.0, 0.0);\n"
+        "   float ambientStrength = 0.2;\n"
+        "   float specularStrength = 0.5;\n"
+        "   lights += lightColor * ambientStrength;  // ambient light\n"
+        "   \n"
+        "   float NdotL = dot(normalize(Normal), normalize(light));\n"
+        "   if (NdotL > 0) {\n"
+        "       // diffuse lighting\n"
+        "       lights += max(NdotL, 0.0);  // diffuse light\n"
+        "       \n"
+        "       // specular lighting\n"
+        "       vec3 reflectDir = reflect(-normalize(light), Normal);\n"
+        "       float viewHit = dot(reflectDir, normalize(viewFrag));\n"
+        "       float spec = pow(max(viewHit, 0.0), 16.0);\n"
+        "       lights += specularStrength * spec * lightColor; // specular light\n"
+        "   }\n"
+        "   \n"
+        "   FragColor = vec4(aColor * lights, 1.0);\n"
+        "}\n";
+    auto shader1 = Shader::init(vs1, fs1);
+    if (!shader1.has_value()) {
+        return std::unexpected<std::runtime_error>(shader1.error());
+    }
+
+    const char *vs2 = ""
+        "#version 330 core\n"
+        "\n"
+        "layout (location=0) in vec3 aPos;\n"
+        "\n"
+        "uniform mat4 projection;\n"
+        "uniform mat4 view;\n"
+        "uniform mat4 model;\n"
+        "\n"
+        "void main() {\n"
+        "   gl_Position = projection * view * model * vec4(aPos, 1.0);\n"
+        "}\n";
+    const char *fs2 = ""
+        "#version 330 core\n"
+        "\n"
+        "uniform vec3 lightColor;\n"
+        "out vec4 FragColor;\n"
+        "\n"
+        "void main() {\n"
+        "   FragColor = vec4(lightColor, 1.0);\n"
+        "}\n";
+
+    auto shader2 = Shader::init(vs2, fs2);
+    if (!shader2.has_value()) {
+        return std::unexpected<std::runtime_error>(shader2.error());
+    }
+
+    return std::array<Shader, 2>{
+        std::move(shader1.value()),
+        std::move(shader2.value())
+    };
+}
+
 int screenWidth = 800;
 int screenHeight = 600;
 
-void mainActivity(Shader &shader, GLFWwindow &window) {
-    // // initialize and setup main cube
-    float data[] = {
-        // vertices             // normals          // labels
-        // front face
-        -1.0,  1.0,  1.0,        0.0,  0.0,  1.0,     // ltf
-        -1.0, -1.0,  1.0,        0.0,  0.0,  1.0,     // lbf
-         1.0, -1.0,  1.0,        0.0,  0.0,  1.0,     // rbf
-        -1.0,  1.0,  1.0,        0.0,  0.0,  1.0,     // ltf
-         1.0, -1.0,  1.0,        0.0,  0.0,  1.0,     // rbf
-         1.0,  1.0,  1.0,        0.0,  0.0,  1.0,     // rtf
+struct Models {
+    std::array<unsigned int, 2> VBO, VAO;
+    std::array<Shader, 2> &shaders;
+    std::array<unsigned int, 2> counts;
 
-        // top face
-        -1.0,  1.0,  1.0,        0.0,  1.0,  0.0,     // ltf
-         1.0,  1.0,  1.0,        0.0,  1.0,  0.0,     // rtf
-        -1.0,  1.0, -1.0,        0.0,  1.0,  0.0,     // ltb
-         1.0,  1.0,  1.0,        0.0,  1.0,  0.0,     // rtf
-        -1.0,  1.0, -1.0,        0.0,  1.0,  0.0,     // ltb
-         1.0,  1.0, -1.0,        0.0,  1.0,  0.0,     // rtb
+    ~Models() {
+        glDeleteBuffers(1, &(VBO[0]));
+        glDeleteVertexArrays(1, &(VAO[0]));
+        glDeleteBuffers(1, &(VBO[1]));
+        glDeleteVertexArrays(1, &(VAO[1]));
+    }
 
-        // back face
-        -1.0,  1.0, -1.0,        0.0,  0.0, -1.0,     // ltb
-        -1.0, -1.0, -1.0,        0.0,  0.0, -1.0,     // lbb
-         1.0, -1.0, -1.0,        0.0,  0.0, -1.0,     // rbb
-        -1.0,  1.0, -1.0,        0.0,  0.0, -1.0,     // ltb
-         1.0, -1.0, -1.0,        0.0,  0.0, -1.0,     // rbb
-         1.0,  1.0, -1.0,        0.0,  0.0, -1.0,     // rtb
+    static Models init(std::array<Shader, 2> &shaders) {
+        // initialize and setup main cube
+        float data[] = {
+            // vertices             // normals          // labels
+            // front face
+            -1.0,  1.0,  1.0,        0.0,  0.0,  1.0,     // ltf
+            -1.0, -1.0,  1.0,        0.0,  0.0,  1.0,     // lbf
+             1.0, -1.0,  1.0,        0.0,  0.0,  1.0,     // rbf
+            -1.0,  1.0,  1.0,        0.0,  0.0,  1.0,     // ltf
+             1.0, -1.0,  1.0,        0.0,  0.0,  1.0,     // rbf
+             1.0,  1.0,  1.0,        0.0,  0.0,  1.0,     // rtf
 
-        // bottom face
-        -1.0, -1.0,  1.0,        0.0, -1.0,  0.0,     // lbf
-         1.0, -1.0,  1.0,        0.0, -1.0,  0.0,     // rbf
-        -1.0, -1.0, -1.0,        0.0, -1.0,  0.0,     // lbb
-         1.0, -1.0,  1.0,        0.0, -1.0,  0.0,     // rbf
-        -1.0, -1.0, -1.0,        0.0, -1.0,  0.0,     // lbb
-         1.0, -1.0, -1.0,        0.0, -1.0,  0.0,     // rbb
+            // top face
+            -1.0,  1.0,  1.0,        0.0,  1.0,  0.0,     // ltf
+             1.0,  1.0,  1.0,        0.0,  1.0,  0.0,     // rtf
+            -1.0,  1.0, -1.0,        0.0,  1.0,  0.0,     // ltb
+             1.0,  1.0,  1.0,        0.0,  1.0,  0.0,     // rtf
+            -1.0,  1.0, -1.0,        0.0,  1.0,  0.0,     // ltb
+             1.0,  1.0, -1.0,        0.0,  1.0,  0.0,     // rtb
 
-        // left face
-        -1.0,  1.0,  1.0,       -1.0,  0.0,  0.0,     // ltf
-        -1.0, -1.0,  1.0,       -1.0,  0.0,  0.0,     // lbf
-        -1.0, -1.0, -1.0,       -1.0,  0.0,  0.0,     // lbb
-        -1.0, -1.0, -1.0,       -1.0,  0.0,  0.0,     // lbb
-        -1.0,  1.0,  1.0,       -1.0,  0.0,  0.0,     // ltf
-        -1.0,  1.0, -1.0,       -1.0,  0.0,  0.0,     // ltb
+            // back face
+            -1.0,  1.0, -1.0,        0.0,  0.0, -1.0,     // ltb
+            -1.0, -1.0, -1.0,        0.0,  0.0, -1.0,     // lbb
+             1.0, -1.0, -1.0,        0.0,  0.0, -1.0,     // rbb
+            -1.0,  1.0, -1.0,        0.0,  0.0, -1.0,     // ltb
+             1.0, -1.0, -1.0,        0.0,  0.0, -1.0,     // rbb
+             1.0,  1.0, -1.0,        0.0,  0.0, -1.0,     // rtb
 
-        // right face
-         1.0,  1.0,  1.0,        1.0,  0.0,  0.0,     // rtf
-         1.0, -1.0,  1.0,        1.0,  0.0,  0.0,     // rbf
-         1.0, -1.0, -1.0,        1.0,  0.0,  0.0,     // rbb
-         1.0, -1.0, -1.0,        1.0,  0.0,  0.0,     // rbb
-         1.0,  1.0,  1.0,        1.0,  0.0,  0.0,     // rtf
-         1.0,  1.0, -1.0,        1.0,  0.0,  0.0,     // rtb
-    };
+            // bottom face
+            -1.0, -1.0,  1.0,        0.0, -1.0,  0.0,     // lbf
+             1.0, -1.0,  1.0,        0.0, -1.0,  0.0,     // rbf
+            -1.0, -1.0, -1.0,        0.0, -1.0,  0.0,     // lbb
+             1.0, -1.0,  1.0,        0.0, -1.0,  0.0,     // rbf
+            -1.0, -1.0, -1.0,        0.0, -1.0,  0.0,     // lbb
+             1.0, -1.0, -1.0,        0.0, -1.0,  0.0,     // rbb
 
-    // init and copy vertex data to buffers
-    unsigned int VBO, VAO;
-    glGenBuffers(1, &VBO);
-    glGenVertexArrays(1, &VAO);
+            // left face
+            -1.0,  1.0,  1.0,       -1.0,  0.0,  0.0,     // ltf
+            -1.0, -1.0,  1.0,       -1.0,  0.0,  0.0,     // lbf
+            -1.0, -1.0, -1.0,       -1.0,  0.0,  0.0,     // lbb
+            -1.0, -1.0, -1.0,       -1.0,  0.0,  0.0,     // lbb
+            -1.0,  1.0,  1.0,       -1.0,  0.0,  0.0,     // ltf
+            -1.0,  1.0, -1.0,       -1.0,  0.0,  0.0,     // ltb
 
-    glBindVertexArray(VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_STATIC_DRAW);
+            // right face
+             1.0,  1.0,  1.0,        1.0,  0.0,  0.0,     // rtf
+             1.0, -1.0,  1.0,        1.0,  0.0,  0.0,     // rbf
+             1.0, -1.0, -1.0,        1.0,  0.0,  0.0,     // rbb
+             1.0, -1.0, -1.0,        1.0,  0.0,  0.0,     // rbb
+             1.0,  1.0,  1.0,        1.0,  0.0,  0.0,     // rtf
+             1.0,  1.0, -1.0,        1.0,  0.0,  0.0,     // rtb
+        };
 
-    // aPos (shader)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *) 0);
-    glEnableVertexAttribArray(0);
+        // init and copy vertex data to buffers
+        unsigned int VBO, VAO;
+        glGenBuffers(1, &VBO);
+        glGenVertexArrays(1, &VAO);
 
-    // aNormal (shader)
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *) (3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
+        glBindVertexArray(VAO);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_STATIC_DRAW);
+
+        // aPos (shader)
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *) 0);
+        glEnableVertexAttribArray(0);
+
+        // aNormal (shader)
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *) (3 * sizeof(float)));
+        glEnableVertexAttribArray(1);
+
+        // initialize and setup light cube
+        float lightData[] = {
+            // front face
+            -0.1,  0.1,  0.1,
+            -0.1, -0.1,  0.1,
+             0.1, -0.1,  0.1,
+            -0.1,  0.1,  0.1,
+             0.1, -0.1,  0.1,
+             0.1,  0.1,  0.1,
+
+            // top face
+            -0.1,  0.1,  0.1,
+             0.1,  0.1,  0.1,
+            -0.1,  0.1, -0.1,
+             0.1,  0.1,  0.1,
+            -0.1,  0.1, -0.1,
+             0.1,  0.1, -0.1,
+
+            // back face
+            -0.1,  0.1, -0.1,
+            -0.1, -0.1, -0.1,
+             0.1, -0.1, -0.1,
+            -0.1,  0.1, -0.1,
+             0.1, -0.1, -0.1,
+             0.1,  0.1, -0.1,
+
+            // bottom face
+            -0.1, -0.1,  0.1,
+             0.1, -0.1,  0.1,
+            -0.1, -0.1, -0.1,
+             0.1, -0.1,  0.1,
+            -0.1, -0.1, -0.1,
+             0.1, -0.1, -0.1,
+
+            // left face
+            -0.1,  0.1,  0.1,
+            -0.1, -0.1,  0.1,
+            -0.1, -0.1, -0.1,
+            -0.1, -0.1, -0.1,
+            -0.1,  0.1,  0.1,
+            -0.1,  0.1, -0.1,
+
+            // right face
+             0.1,  0.1,  0.1,
+             0.1, -0.1,  0.1,
+             0.1, -0.1, -0.1,
+             0.1, -0.1, -0.1,
+             0.1,  0.1,  0.1,
+             0.1,  0.1, -0.1,
+        };
+
+        unsigned int VBO2, VAO2;
+        glGenBuffers(1, &VBO2);
+        glGenVertexArrays(1, &VAO2);
+
+        glBindVertexArray(VAO2);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO2);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(lightData), lightData, GL_STATIC_DRAW);
+
+        // aPos (shader)
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *) 0);
+        glEnableVertexAttribArray(0);
+
+        return Models {
+            .VBO = { VBO, VBO2 },
+            .VAO = { VAO, VAO2 },
+            .shaders = shaders,
+            .counts = {
+                sizeof(data) / (2 * 3 * sizeof(float)),
+                sizeof(lightData) / (3 * sizeof(float))
+            }
+        };
+    }
+};
+
+void mainActivity(std::array<Shader, 2> &shaders, GLFWwindow &window) {
+    auto models = Models::init(shaders);
+    glm::vec3 cameraPos(3.0f, 2.0f, 5.0f);
 
     // set uniforms
-    shader.use();
-    glm::vec3 cameraPos(3.0f, 2.0f, 5.0f);
-    shader.setVec3f("viewPos", cameraPos);
-    shader.setMat4f("view", glm::lookAt(
+    models.shaders[0].use();
+    models.shaders[0].setVec3f("viewPos", cameraPos);
+    models.shaders[0].setMat4f("view", glm::lookAt(
         cameraPos,
         glm::vec3(0.0f, 0.0f, 0.0f),
         glm::vec3(0.0f, 1.0f, 0.0f)
     ));
-    shader.setMat4f("model", glm::identity<glm::mat4>());
-    shader.setVec3f("aColor", glm::vec3(0.7, 0.5, 0.2));
-    shader.setVec3f("lightColor", glm::vec3(1.0, 1.0, 1.0));
+    models.shaders[0].setMat4f("model", glm::identity<glm::mat4>());
+    models.shaders[0].setVec3f("aColor", glm::vec3(0.7, 0.5, 0.2));
+    models.shaders[0].setVec3f("lightColor", glm::vec3(1.0, 1.0, 1.0));
     // shader.setVec3f("lightPos", glm::vec3(2.0, 1.5, 3.0));
-    shader.setVec3f("lightPos", glm::vec3(-3.0, 2.0, -5.0));
+    // shader.setVec3f("lightPos", glm::vec3(-3.0, 2.0, -5.0));
     // shader.setVec3f("lightPos", glm::vec3(-0.5, 0.0, 1.5));
 
-    const int count = sizeof(data) / (2 * 3 * sizeof(float));
-    printf("Count: %d\n", count);
-    
-    // float bufRead[9] = {0};
+    models.shaders[1].use();
+    models.shaders[1].setMat4f("view", glm::lookAt(
+        cameraPos,
+        glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f)
+    ));
+    models.shaders[1].setVec3f("lightColor", glm::vec3(1.0, 1.0, 1.0));
+
+    assert(glGetError() == GL_NO_ERROR);
+
+    // std::println("Count: {}", models.counts[0]);
+    // float bufRead[108] = {0};
+    // glBindBuffer(GL_ARRAY_BUFFER, models.VBO[1]);
     // glGetBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(bufRead), bufRead);
-    // printf("Read data: {\n");
-    // for (int i = 0; i < 3; i++) {
-    //     printf("\t%f, %f, %f\n", bufRead[i * 3 + 0], bufRead[i * 3 + 1], bufRead[i * 3 + 2]);
+    // std::println("Read data: {{");
+    // for (int i = 0; i < 36; i++) {
+    //     std::println("\t{}, {}, {},", bufRead[i * 3 + 0], bufRead[i * 3 + 1], bufRead[i * 3 + 2]);
     // }
-    // printf("}\n");
+    // std::println("}}");
 
     // render stuffs
+    auto previousTime = std::chrono::steady_clock::now();
+    glm::vec4 lightPos = glm::vec4(-2.0, 0.0, -2.0, 1.0);
     while (!glfwWindowShouldClose(&window)) {
+        auto currentTime = std::chrono::steady_clock::now();
         assert(glGetError() == GL_NO_ERROR);
         glEnable(GL_DEPTH_TEST);
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        const float deltaTime = std::chrono::duration<float>(currentTime - previousTime).count();
         const float aspectRatio = (float)screenWidth / (float)screenHeight;
-        shader.setMat4f("projection", glm::perspective(glm::radians(45.0f), aspectRatio, 1.0f, 10.0f));
+        glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspectRatio, 1.0f, 20.0f);
+        glm::mat4 rotation = glm::identity<glm::mat4>();
+        rotation = glm::rotate(rotation, glm::radians(30.0f * deltaTime), glm::vec3(0.0, 1.0, 0.0));
+        lightPos = lightPos * rotation;
 
-        glBindVertexArray(VAO);
-        glDrawArrays(GL_TRIANGLES, 0, count);
+        // shader 1
+        models.shaders[0].use();
+        models.shaders[0].setMat4f("projection", projection);
+        models.shaders[0].setVec3f("lightPos", glm::vec3(lightPos));
+        glBindBuffer(GL_ARRAY_BUFFER, models.VBO[0]);
+        glBindVertexArray(models.VAO[0]);
+        glDrawArrays(GL_TRIANGLES, 0, models.counts[0]);
+
+        // shader 2
+        models.shaders[1].use();
+        models.shaders[1].setMat4f("projection", projection);
+        models.shaders[1].setMat4f("model",
+                glm::translate(glm::identity<glm::mat4>(), glm::vec3(lightPos)));
+        glBindBuffer(GL_ARRAY_BUFFER, models.VBO[1]);
+        glBindVertexArray(models.VAO[1]);
+        glDrawArrays(GL_TRIANGLES, 0, models.counts[1]);
 
         glfwPollEvents();
         glfwSwapBuffers(&window);
+        previousTime = currentTime;
     }
 
-    glDeleteBuffers(1, &VBO);
-    glDeleteVertexArrays(1, &VAO);
 }
 
 int main(void) {
     glfwSetErrorCallback([](int error, const char *description) {
-        fprintf(stderr, "Error: %s\n", description);
+        std::println(stderr, "Error: {}\n", description);
     });
 
     // init glfw window
@@ -307,9 +476,9 @@ int main(void) {
         screenWidth = width;
     });
 
-    auto shaderProgram = Shader::init();
+    auto shaderProgram = initShaders();
     if (!shaderProgram.has_value()) {
-        fprintf(stderr, "%s\n", shaderProgram.error().what());
+        std::println(stderr, "{}", shaderProgram.error().what());
         return EXIT_FAILURE;
     }
     
